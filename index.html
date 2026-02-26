@@ -2,8 +2,17 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Fahh 💨</title>
+
+    <!-- PWA -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Fahh" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+
     <style>
       * {
         margin: 0;
@@ -22,6 +31,8 @@
         height: 100vh;
         position: absolute;
         z-index: 10;
+        touch-action: none;
+        user-select: none;
       }
 
       footer {
@@ -40,6 +51,7 @@
         text-align: center;
         color: white;
         pointer-events: none;
+        transition: opacity 0.5s;
       }
 
       footer a {
@@ -49,7 +61,7 @@
   </head>
   <body>
     <div id="hint">
-      <h1>Click to Fahh 💨</h1>
+      <h1>Tap to Fahh 💨</h1>
     </div>
 
     <canvas></canvas>
@@ -65,39 +77,84 @@
 <script>
   const canvas = document.querySelector("canvas");
   const ctx = canvas.getContext("2d");
+  const hint = document.getElementById("hint");
 
   const resize = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
   };
-
   window.addEventListener("resize", resize);
   resize();
 
-  const sayFahh = () => {
-    const audio = new Audio("fahh.mp3");
-    audio.play();
-  };
+  // --- Audio ---
+  let audioCtx = null;
+  let audioBuffer = null;
+  let decodeStarted = false;
 
-  canvas.onclick = (event) => {
-    const x = event.offsetX;
-    const y = event.offsetY;
+  // Kick off background decode after first user gesture so subsequent taps are lag-free.
+  function startDecode() {
+    if (decodeStarted) return;
+    decodeStarted = true;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    fetch("fahh.mp3")
+      .then((r) => r.arrayBuffer())
+      .then((ab) => new Promise((resolve, reject) => {
+        audioCtx.decodeAudioData(ab, resolve, reject);
+      }))
+      .then((decoded) => { audioBuffer = decoded; })
+      .catch(() => {});
+  }
+
+  function sayFahh() {
+    if (audioBuffer) {
+      // Fast path: decoded buffer is ready — zero lag.
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(audioCtx.destination);
+      src.start(0);
+    } else {
+      // First tap (or decode not yet done): play via HTML Audio element.
+      // This is called synchronously inside the user gesture so autoplay is allowed.
+      new Audio("fahh.mp3").play().catch(() => {});
+      startDecode();
+    }
+  }
+
+  // --- Interaction handler (shared by pointer and touch) ---
+  let hintHidden = false;
+
+  function handleInteraction(x, y) {
+    if (!hintHidden) {
+      hint.style.opacity = "0";
+      hintHidden = true;
+    }
 
     const angleInRadians = Math.random() * Math.PI * 2;
-
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angleInRadians);
-
     ctx.font = "bold 64px 'Comic Sans MS', 'Comic Sans', monospace";
     ctx.fillStyle = `hsl(${Math.random() * 360}, 100%, 65%)`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("FAHH", 0, 0);
-
     ctx.restore();
 
     sayFahh();
-  };
+  }
+
+  // pointerdown works for both mouse and touch with no 300ms delay.
+  canvas.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handleInteraction(event.offsetX, event.offsetY);
+  });
+
+  // --- Service Worker ---
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
 </script>
