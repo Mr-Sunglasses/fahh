@@ -99,9 +99,15 @@
   function ensureAudio() {
     if (audioBuffer) return Promise.resolve();
     if (audioInitPromise) return audioInitPromise;
-    audioInitPromise = audioFetchPromise.then((arrayBuffer) => {
+    // Create AudioContext synchronously inside the user gesture so it starts as "running".
+    if (!audioCtx) {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      return audioCtx.decodeAudioData(arrayBuffer);
+    }
+    audioInitPromise = audioFetchPromise.then((arrayBuffer) => {
+      // Use callback form for Safari compatibility (old WebKit ignores the return value).
+      return new Promise((resolve, reject) => {
+        audioCtx.decodeAudioData(arrayBuffer, resolve, reject);
+      });
     }).then((decoded) => {
       audioBuffer = decoded;
     });
