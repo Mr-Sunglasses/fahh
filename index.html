@@ -87,49 +87,39 @@
   window.addEventListener("resize", resize);
   resize();
 
-  // --- Audio: pre-fetch MP3 data immediately (no user interaction needed for fetch) ---
-  const audioFetchPromise = fetch("fahh.mp3").then((r) => r.arrayBuffer());
-
+  // --- Audio ---
   let audioCtx = null;
   let audioBuffer = null;
-  let audioInitPromise = null;
+  let decodeStarted = false;
 
-  // Called on first interaction to create AudioContext and decode the buffer once.
-  // Subsequent calls return immediately because audioBuffer is already set.
-  function ensureAudio() {
-    if (audioBuffer) return Promise.resolve();
-    if (audioInitPromise) return audioInitPromise;
-    // Create AudioContext synchronously inside the user gesture so it starts as "running".
-    if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    }
-    audioInitPromise = audioFetchPromise.then((arrayBuffer) => {
-      // Use callback form for Safari compatibility (old WebKit ignores the return value).
-      return new Promise((resolve, reject) => {
-        audioCtx.decodeAudioData(arrayBuffer, resolve, reject);
-      });
-    }).then((decoded) => {
-      audioBuffer = decoded;
-    });
-    return audioInitPromise;
+  // Kick off background decode after first user gesture so subsequent taps are lag-free.
+  function startDecode() {
+    if (decodeStarted) return;
+    decodeStarted = true;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    fetch("fahh.mp3")
+      .then((r) => r.arrayBuffer())
+      .then((ab) => new Promise((resolve, reject) => {
+        audioCtx.decodeAudioData(ab, resolve, reject);
+      }))
+      .then((decoded) => { audioBuffer = decoded; })
+      .catch(() => {});
   }
 
-  // Play a fresh buffer-source node each time — zero lag after first call.
   function sayFahh() {
-    ensureAudio()
-      .then(() => {
-        if (audioCtx.state === "suspended") return audioCtx.resume();
-      })
-      .then(() => {
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(audioCtx.destination);
-        source.start(0);
-      })
-      .catch(() => {
-        // Fallback for browsers without Web Audio API
-        new Audio("fahh.mp3").play().catch(() => {});
-      });
+    if (audioBuffer) {
+      // Fast path: decoded buffer is ready — zero lag.
+      if (audioCtx.state === "suspended") audioCtx.resume();
+      const src = audioCtx.createBufferSource();
+      src.buffer = audioBuffer;
+      src.connect(audioCtx.destination);
+      src.start(0);
+    } else {
+      // First tap (or decode not yet done): play via HTML Audio element.
+      // This is called synchronously inside the user gesture so autoplay is allowed.
+      new Audio("fahh.mp3").play().catch(() => {});
+      startDecode();
+    }
   }
 
   // --- Interaction handler (shared by pointer and touch) ---
